@@ -15,7 +15,6 @@ require (
 )
 
 require (
-	cloud.google.com/go v0.100.2 // indirect
 	cloud.google.com/go/compute v1.4.0 // indirect
 	github.com/boj/redistore v0.0.0-20180917114910-cd5dcc76aeff // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -31,7 +30,6 @@ require (
 	github.com/gorilla/context v1.1.1 // indirect
 	github.com/gorilla/securecookie v1.1.1 // indirect
 	github.com/gorilla/sessions v1.2.1 // indirect
-	github.com/hashicorp/golang-lru v0.5.4 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/leodido/go-urn v1.2.1 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect

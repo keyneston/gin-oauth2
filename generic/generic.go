@@ -1,6 +1,6 @@
 // Package discord provides you access to Discord's OAuth2
 // infrastructure.
-package discord
+package generic
 
 import (
 	"crypto/rand"
@@ -8,9 +8,8 @@ import (
 	"encoding/gob"
 	"fmt"
 	"net/http"
-	"net/url"
 
-	"github.com/gin-gonic/contrib/sessions"
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"github.com/golang/glog"
 
@@ -19,17 +18,18 @@ import (
 )
 
 type Endpoint struct {
-	conf  *oauth2.Config
-	state string // TODO: replace this with a signed token
-	store sessions.CookieStore
+	conf    *oauth2.Config
+	state   string // TODO: replace this with a signed token
+	store   sessions.Store
+	authKey string
 }
 
-type Config struct {
-	ClientID     string
-	ClientSecret string
-	RedirectURL  url.URL
-	Endpoint     oauth2.Endpoint
-	Scopes       []string
+type SetupInput struct {
+	OAuthConfig  *oauth2.Config
+	SessionStore sessions.Store
+
+	// AuthKey is the key used to store the auth information in the session. Defaults to: "auth"
+	AuthKey string
 }
 
 func randToken() string {
@@ -40,19 +40,15 @@ func randToken() string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 
-func Setup(config Config) *Endpoint {
-	store := sessions.NewCookieStore([]byte(config.ClientSecret))
-	conf := &oauth2.Config{
-		ClientID:     config.ClientID,
-		ClientSecret: config.ClientSecret,
-		RedirectURL:  config.RedirectURL.String(),
-		Scopes:       config.Scopes,
-		Endpoint:     config.Endpoint,
+func Setup(input SetupInput) *Endpoint {
+	if input.AuthKey == "" {
+		input.AuthKey = "auth"
 	}
 
 	return &Endpoint{
-		conf:  conf,
-		store: store,
+		conf:    input.OAuthConfig,
+		store:   input.SessionStore,
+		authKey: input.AuthKey,
 	}
 }
 
@@ -94,7 +90,7 @@ func (e *Endpoint) Auth() gin.HandlerFunc {
 
 		// Handle the exchange code to initiate a transport.
 		session := sessions.Default(ctx)
-		mysession := session.Get("ginoauthgh")
+		mysession := session.Get(e.authKey)
 		if authUser, ok = mysession.(AuthUser); ok {
 			ctx.Set("user", authUser)
 			ctx.Next()
@@ -129,7 +125,7 @@ func (e *Endpoint) Auth() gin.HandlerFunc {
 		ctx.Set("user", authUser)
 
 		// populate cookie
-		session.Set("ginoauthgh", authUser)
+		session.Set(e.authKey, authUser)
 		if err := session.Save(); err != nil {
 			glog.Errorf("Failed to save session: %v", err)
 		}
