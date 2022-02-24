@@ -3,9 +3,11 @@
 package generic
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"net/http"
 
@@ -13,15 +15,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang/glog"
 
-	"github.com/google/go-github/github"
 	"golang.org/x/oauth2"
 )
 
 type Endpoint struct {
-	conf    *oauth2.Config
-	state   string // TODO: replace this with a signed token
-	store   sessions.Store
-	authKey string
+	conf        *oauth2.Config
+	state       string // TODO: replace this with a signed token
+	store       sessions.Store
+	authKey     string
+	authFactory AuthFactory
 }
 
 type SetupInput struct {
@@ -30,7 +32,13 @@ type SetupInput struct {
 
 	// AuthKey is the key used to store the auth information in the session. Defaults to: "auth"
 	AuthKey string
+
+	// AuthFactory returns the type that is used to store the user's data. By
+	// default this creates instances of `*AuthUser`.
+	AuthFactory AuthFactory
 }
+
+type AuthFactory func() interface{}
 
 func randToken() string {
 	b := make([]byte, 32)
@@ -44,11 +52,17 @@ func Setup(input SetupInput) *Endpoint {
 	if input.AuthKey == "" {
 		input.AuthKey = "auth"
 	}
+	if input.AuthFactory == nil {
+		input.AuthFactory = func() interface{} {
+			return &AuthUser{}
+		}
+	}
 
 	return &Endpoint{
-		conf:    input.OAuthConfig,
-		store:   input.SessionStore,
-		authKey: input.AuthKey,
+		conf:        input.OAuthConfig,
+		store:       input.SessionStore,
+		authKey:     input.AuthKey,
+		authFactory: input.AuthFactory,
 	}
 }
 
@@ -82,17 +96,12 @@ func init() {
 
 func (e *Endpoint) Auth() gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		var (
-			ok       bool
-			authUser AuthUser
-			user     *github.User
-		)
-
 		// Handle the exchange code to initiate a transport.
 		session := sessions.Default(ctx)
 		mysession := session.Get(e.authKey)
-		if authUser, ok = mysession.(AuthUser); ok {
-			ctx.Set("user", authUser)
+		// TODO: better store token
+		if tokString, ok := mysession.(string); ok {
+			ctx.Set(e.authKey, tokString)
 			ctx.Next()
 			return
 		}
@@ -103,29 +112,21 @@ func (e *Endpoint) Auth() gin.HandlerFunc {
 			return
 		}
 
-		// TODO: oauth2.NoContext -> context.Context from stdlib
-		tok, err := e.conf.Exchange(oauth2.NoContext, ctx.Query("code"))
+		tok, err := e.conf.Exchange(context.Background(), ctx.Query("code"))
 		if err != nil {
 			ctx.AbortWithError(http.StatusBadRequest, fmt.Errorf("Failed to do exchange: %v", err))
 			return
 		}
-		client := github.NewClient(e.conf.Client(oauth2.NoContext, tok))
-		user, _, err = client.Users.Get(oauth2.NoContext, "")
+
+		// TODO: better store token
+		tokString, err := json.Marshal(tok)
 		if err != nil {
-			ctx.AbortWithError(http.StatusBadRequest, fmt.Errorf("Failed to get user: %v", err))
+			glog.Errorf("Failed to save session: %v", err)
 			return
 		}
 
-		// save userinfo, which could be used in Handlers
-		authUser = AuthUser{
-			Login: *user.Login,
-			Name:  *user.Name,
-			URL:   *user.URL,
-		}
-		ctx.Set("user", authUser)
-
 		// populate cookie
-		session.Set(e.authKey, authUser)
+		session.Set(e.authKey, tokString)
 		if err := session.Save(); err != nil {
 			glog.Errorf("Failed to save session: %v", err)
 		}
